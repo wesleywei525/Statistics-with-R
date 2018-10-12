@@ -1,0 +1,217 @@
+---
+title: "Modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(GGally)
+library(gridExtra)
+library(knitr)
+```
+
+### Load data
+```{r load-data}
+load("movies.Rdata")
+```
+* * *
+## Part 1: Data
+Dataset "movies" for this project randomly collected 651 movies which were released before 2016. The information and rating of these movies are from two sources: [Rotten Tomatoes](https://www.rottentomatoes.com) and [IMDb](http://www.imdb.com).
+
+Rotten Tomatoes is a leading film and TV shows reviews aggregation website in American. The company was launched in 1998 and acquired by Warner Bros in 2011. Staff of Rotten Tomatoes collect online reviews from writers who are certified members of various writing guilds or film critic-associations and then determine for each review whether it is positive or negative. File with over 60% positive reviews is considered "fresh", otherwise "rotten".
+
+Internet Movie Database, also known as IMDb, is an online information database of world films, TV programs and video games, which also including tons of cast and production crew profiles, plot summaries, reviews and ratings. Until December 2017, IMDb has stored approximately  4.7 million titles and 8.3 million personalities in its database.
+
+Since this dataset is randomly selected from these two sources, our result could be generalizable. However, these two websites are more popular in US than other countries, reviewers and critics might not distribute evenly across the global. Thus the result might have its limitation.
+
+As the information of movies are collected as observation objects without any group assignment, thus the relationship from the data should only indication association but not causation.
+
+* * *
+## Part 2: Research question
+Intention of this research is learning what attributes make a movie popular and if we could use these attributes to predict. We use variable "critics_score" to determine the popularity and the explanatory variables we are going to bring in are: genre, mpaa_rating, audience_score, best_pic_nom and at least one Oscar winner contribute to the movie.
+
+* * *
+## Part 3: Exploratory data analysis
+First, let's create a new variable for indicating whether the movie have at least one Oscar winner or not.
+```{r create variable Oscar_winner}
+movies <- movies %>%
+  mutate(Oscar_winner = ifelse(best_actor_win == 'yes' | best_actress_win == 'yes' | best_dir_win == 'yes','yes','no'))
+
+movies$Oscar_winner <- as.factor(movies$Oscar_winner)
+```
+
+In order to explore the relationship between Critics score and the category variables, boxplots are plotted for critics_socre and each category variables and ordered by the median. 
+```{r genre, mpaa_rating, best_pic_nom, Oscar_winner}
+p1<-ggplot(movies, aes(x = reorder(genre, critics_score, FUN = median), y = critics_score)) + geom_boxplot()+xlab("Genre")
+p2<-ggplot(movies, aes(x = reorder(mpaa_rating, critics_score, FUN = median), y = critics_score)) + geom_boxplot()+xlab("Mpaa Rating")
+p3<-ggplot(movies, aes(x = best_pic_nom, y = critics_score)) + geom_boxplot()+xlab("Best Picture Nominate")
+p4<-ggplot(movies, aes(x = Oscar_winner, y = critics_score)) + geom_boxplot()+xlab("Oscar Winner")
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+From the boxplots, we can see that the median critics score is different between different genre and MPAA rating groups. And movies that have been nominated a best picture Oscar have significantly high scores. However, having an Oscar winner or not don't show a strong relationship with the score. 
+
+A scatter plot is used to display the relationship between critics score and audience score since they are both numerical variables. The plot shows a strong linear relationship between critics score and audience score.
+```{r, audience_score}
+ggplot(movies,aes(x=audience_score,y=critics_score))+geom_point()+
+  stat_smooth(method="lm", se=T)
+
+```
+
+* * *
+## Part 4: Modeling
+The response variable we select for the model is critics score, and the explanatory variables are audience score, genre, mpaa_rating, best_pic_nom and Oscar_winner. We exclude audience_rating from the consideration is because audience rating is based on audience score which will bring in correlation with it. We want to create a model for prediction, so we will use adjusted R-square as the model performance criteria and use forward selection which allow us to start with simple model.
+
+### Forward selection using adjusted R-square
+
+#### Step 1: Models with one variable
+```{r forward selection - adj r2}
+var_list <- c("audience_score", "genre", "mpaa_rating", "best_pic_nom", "Oscar_winner")
+result <- data.frame(Adjusted_R2 = rep(NA,5),row.names = paste("critics_score ~",var_list))
+for (i in 1:length(var_list)) {
+  result[i,] <- summary(lm(paste("critics_score ~",var_list[i]), data=movies))$adj.r.squared
+}
+result
+```
+From the result table, we find that the audience_score model has the highest adjusted R-square 0.495. So we will select it into the model first. The next step is building two variable models using audience_score and one of the other candidates.
+
+#### Step 2: Models with two variables
+```{r forward step 2}
+var_list <- c("genre", "mpaa_rating", "best_pic_nom", "Oscar_winner")
+result <- data.frame(Adjusted_R2 = rep(NA,4),row.names = paste("critics_score ~ audience_score +" ,var_list))
+for (i in 1:length(var_list)) {
+  result[i,] <- summary(lm(paste("critics_score ~ audience_score +",var_list[i]), data=movies))$adj.r.squared
+}
+result
+```
+The result table shows that model with audience_score and genre reach to higher adjusted R-square than other three, so genre is added to the model.
+
+#### Step 3: Models with three variables
+```{r forward step 3}
+var_list <- c("mpaa_rating", "best_pic_nom", "Oscar_winner")
+result <- data.frame(Adjusted_R2 = rep(NA,3),row.names = paste("critics_score ~ audience_score + genre +" ,var_list))
+for (i in 1:length(var_list)) {
+  result[i,] <- summary(lm(paste("critics_score ~ audience_score + genre +",var_list[i]), data=movies))$adj.r.squared
+}
+result
+```
+Base on the result, we add mpaa_rating to the model.
+
+#### Step 4: Models with four variables
+```{r forward step 4}
+var_list <- c("best_pic_nom", "Oscar_winner")
+result <- data.frame(Adjusted_R2 = rep(NA,2),row.names = paste("critics_score ~ audience_score + genre + mpaa_rating +" ,var_list))
+for (i in 1:length(var_list)) {
+  result[i,] <- summary(lm(paste("critics_score ~ audience_score + genre + mpaa_rating +",var_list[i]), data=movies))$adj.r.squared
+}
+result
+```
+Base on the result, we add best_pic_nom to the model.
+
+#### Step 5: Model with five variables
+```{r forward step 5}
+data.frame(Adjusted_R2 = summary(
+  lm(critics_score ~ audience_score + genre + mpaa_rating + best_pic_nom + Oscar_winner, data=movies))$adj.r.squared,
+  row.names = "critics_score ~ audience_score + genre + mpaa_rating + best_pic_nom + Oscar_winner")
+```
+We include all five predict variables and get one full model. This full model has adjusted R-square 0.533 which is higher than the four-variable model from last step. So we will use this model as the final model.
+
+### Model Dignose
+```{r}
+final_model <- lm(critics_score ~ audience_score + genre + mpaa_rating + best_pic_nom + Oscar_winner, data=movies)
+plot(final_model$residuals ~ final_model$fitted.values)
+abline(h=0, col = 'red')
+```
+```{r}
+par(mfrow = c(1,2))
+qqnorm(final_model$residuals)
+qqline(final_model$residuals, col = "red")
+hist(final_model$residuals, prob = T)
+lines(density(final_model$residuals, adjust=3), lty = 2, col = "red")
+par(mfrow = c(1,1))
+```
+
+From the residual plots above we can see that the residuals are not in fan shape and the qq-plot indicate residuals are following a normal distribution.
+```{r residual vs variables}
+plot(final_model$residuals ~ movies$audience_score)
+abline(h=0, col = 'red')
+
+par(mfrow = c(1,2))
+plot(final_model$residuals ~ movies$genre)
+abline(h=0, col = 'red')
+
+plot(final_model$residuals ~ movies$mpaa_rating)
+abline(h=0, col = 'red')
+
+plot(final_model$residuals ~ movies$best_pic_nom)
+abline(h=0, col = 'red')
+
+plot(final_model$residuals ~ movies$Oscar_winner)
+abline(h=0, col = 'red')
+par(mfrow = c(1,1))
+```
+
+Plot of residuals vs each predict variables also show residuals are independent with them. 
+
+### Interpretation of model coefficients
+Let us print out the model detail for explaining coefficients. 
+```{r}
+summary(final_model)
+```
+#### Coefficient of audience_score
+The coefficient of audience_score is 0.86 which means one additional score from audience will raise 0.86 score from critics averagely.
+
+#### Coefficient of genre
+Genre is a category variable so its coefficient is map to a movie's genre. As an example, a drama will have an additional 10.09 score averagely and a animation will have a -5.47 critics score on genre term.
+
+#### Coefficient of mpaa_rating
+Same as genre, coefficient of mpaa_rating is map to a movie's MPAA rating group. A movie has PG-13 rating will reduce critics score for about 13.73.
+
+#### Coefficient of best_pic_nom and Oscar_winner
+With other conditions hold at same level, a movie has nominated for best picture Oscar will have 8.18 critics score higher than those hasn't. And a movie has at least one Oscar winner will have averagely 2.94 higher critics score than movie don't but with same other conditions.
+
+* * *
+## Part 5: Prediction
+Lala Land is one of my favorite  movie in year 2016 so I will use this movie for prediction. Its audience score, genre and MPAA rating information are from [Rotten Tomatoes](https://www.rottentomatoes.com/m/la_la_land) and the award information are from [IMDb](http://www.imdb.com/title/tt3783958/awards?ref_=tt_ql_op_1) which is list as following:  
+  1) audience_score = 81  
+  2) genre = "Drama"  
+  3) mpaa_rating = "PG-13"  
+  4) best_pic_nom = "yes"  
+  5) Oscar_winner = "yes"  
+
+```{r}
+Lala_Land <- data.frame(audience_score = 81, genre = "Drama", mpaa_rating = "PG-13", best_pic_nom = "yes", Oscar_winner = "yes")
+predict(final_model,Lala_Land, interval = "prediction", level = 0.95)
+```
+
+Putting the information into the finial model we get before, the point estimation of critics_score is 81.18 with 95% confidence interval [42.10, 100], and the score cannot exceed 100. So we are 95% confident that the real critics score on Rotten Tomatoes for Lala Land is fall into the interval from 43.10 to 100.
+
+* * *
+## Part 6: Conclusion
+The model we create in this research allow us to predict a movie's critics score on Rotten Tomatoes using audience score, genre, mpaa rating, ever nominated for best picture Oscar and whether have an Oscar winner. This model can explain over 50% of the sample movies. And even not every category is significant in the model, consider as a whole variable, all of them are having strong relationship between the response variable.
+
+From the model result, we know that a movie's popularity is positive relate to audience score. Certain genre movies are likely to become more popular such as documentary and Mystery & Suspense. Also MPAA rating is relate to a movie's score as well as being nominated for best picture in Oscar.
+
+One of the shortcomings of this model is I didn't modify the categories in each variable which can make some of the categories are not significant in the model. For future research, we could combine some categories and approach to a better estimation. Another shortcoming is that the variables in the dataset is limited. For example, an Oscar award is just one of the many awards that could measure a movie's popularity, so we can include more valuable awards or other information for movies and actors/actresses. 
+
+
+
+
+
+
+
+
+
+
+
+

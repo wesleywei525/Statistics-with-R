@@ -1,0 +1,231 @@
+---
+title: "Bayesian modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    fig_width: 10
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(BAS)
+library(magrittr)
+library(knitr)
+library(gridExtra)
+```
+
+### Load data
+```{r load-data}
+load("movies.Rdata")
+```
+
+* * *
+
+## Part 1: Data
+Dataset "movies" for this project randomly collected 651 movies which were released before 2016. The information and rating of these movies are from two sources: [Rotten Tomatoes](https://www.rottentomatoes.com) and [IMDb](http://www.imdb.com).
+
+Rotten Tomatoes is a leading film and TV shows reviews aggregation website in American. The company was launched in 1998 and acquired by Warner Bros in 2011. Staff of Rotten Tomatoes collect online reviews from writers who are certified members of various writing guilds or film critic-associations and then determine for each review whether it is positive or negative. File with over 60% positive reviews is considered "fresh", otherwise "rotten".
+
+Internet Movie Database, also known as IMDb, is an online information database of world films, TV programs and video games, which also including tons of cast and production crew profiles, plot summaries, reviews and ratings. Until December 2017, IMDb has stored approximately 4.7 million titles and 8.3 million personalities in its database.
+
+Since this dataset is randomly selected from these two sources, our result is generalizable. However, these two websites are more popular in US than other countries, reviewers and critics might not distribute evenly across the global. Thus the result might have its limitation.
+
+As the information of movies are collected as observation objects without any group assignment, thus the relationship from the data should only indication association not causation.
+
+* * *
+
+## Part 2: Data manipulation
+We have some specific feature of movies that we want to analyze so we split them out from others and create new variables base on them.
+```{r}
+movies <- movies %>%
+  mutate(feature_film = factor(ifelse(movies$title_type == "Feature Film", "Yes", "No")),
+         drama = factor(ifelse(movies$genre == "Drama", "Yes", "No")),
+         mpaa_rating_R = factor(ifelse(movies$mpaa_rating == "R", "Yes", "No")),
+         oscar_season = factor(ifelse(movies$thtr_rel_month %in% c(10,11,12), "Yes", "No")),
+         summer_season = factor(ifelse(movies$thtr_rel_month %in% c(5,6,7,8), "Yes", "No")))
+
+```
+Following tables can help us to check if we group the samples correct for each variable.
+```{r}
+summary(movies[c("title_type","feature_film","genre","drama","mpaa_rating","mpaa_rating_R")])
+
+cbind(table(movies$thtr_rel_month, movies$oscar_season),table(movies$thtr_rel_month, movies$summer_season)) %>%
+  data.frame() %>%
+  setNames(c("not_oscar_season","oscar_season","not_summer_season","summer_season"))
+
+```
+
+* * *
+
+## Part 3: Exploratory data analysis
+Relationship between *audience_score* and the new variables we created from previous step is showing in following boxplots.
+```{r}
+layout(matrix(c(1,2,3), 1, 3, byrow = TRUE))
+boxplot(audience_score ~ feature_film, data= movies, xlab = "Plot 1: feature_film",ylab = "audience_score")
+boxplot(audience_score ~ drama, data= movies, xlab = "Plot 2: drama",ylab = "audience_score")
+boxplot(audience_score ~ mpaa_rating_R, data= movies, xlab = "Plot 3: mpaa_rating_R",ylab = "audience_score")
+```
+
+Plot 1 shows that median audience score of feature films is significantly lower than that of other types of films. Huge score range of feature films indicate this type of movie is quite a mixed bag, so whether people like a movie or not is hard to tell from it title type.
+
+Plot 2 shows the relationship between audience score and whether a film's genre is drama. The median score of drama movies is higher than other genre type movies but the range is close. 
+
+Plot 3 shows the association between audience score and whether a movie's rate is R is weak since both quantiles and range are close for two groups.
+
+```{r, fig.width = 8}
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+boxplot(audience_score ~ oscar_season, data= movies, xlab = "Plot 4: oscar_season",ylab = "audience_score")
+boxplot(audience_score ~ summer_season, data= movies, xlab = "Plot 5: summer_season",ylab = "audience_score")
+```
+
+Plot 4 and plot 5 display the relationship between audience score of movies and whether the movie is release in Oscar season or summer season. Highly overlap of the quantiles and range indicate the relation between score and release month is weak. It seems that movies released in Oscar season or summer season are not necessarily having a higher or lower audience score.  
+
+
+```{r}
+t1 <- movies %>%
+  group_by(feature_film) %>%
+  summarise(n=n(), Mean = mean(audience_score), Var = var(audience_score)) 
+t2 <- movies %>%
+  group_by(drama) %>% 
+  summarise(n=n(), Mean = mean(audience_score), Var = var(audience_score)) 
+t3 <- movies %>%
+  group_by(mpaa_rating_R) %>%
+  summarise(n=n(), Mean = mean(audience_score), Var = var(audience_score)) 
+t4 <- movies %>%
+  group_by(oscar_season) %>%
+  summarise(n=n(), Mean = mean(audience_score), Var = var(audience_score)) 
+t5 <- movies %>%
+  group_by(summer_season) %>%
+  summarise(n=n(), Mean = mean(audience_score), Var = var(audience_score)) 
+
+for (t in list(t1,t2,t3,t4,t5)){
+  print(kable(t))
+}
+```
+
+The result from summary tables also agree with boxplots we generated before.
+
+* * *
+
+## Part 4: Modeling
+We put following  variables into the full model as a start:
+
+* feature_film
+* drama
+* runtime
+* mpaa_rating_R
+* thtr_rel_year
+* oscar_season
+* summer_season
+* imdb_rating
+* imdb_num_votes
+* critics_score
+* best_pic_nom
+* best_pic_win
+* best_actor_win
+* best_actress_win
+* best_dir_win
+* top200_box
+
+### Bayesian model selection
+
+```{r,fig.height = 6}
+full_model <- bas.lm(audience_score ~ feature_film + drama + runtime + mpaa_rating_R + 
+                       thtr_rel_year + oscar_season + summer_season + imdb_rating + 
+                       imdb_num_votes + critics_score + best_pic_nom + best_pic_win + 
+                       best_actor_win + best_actress_win + best_dir_win + top200_box,
+                     data = na.omit(movies),
+                     prior = "BIC",
+                     modelprior = uniform())
+summary(full_model) %>% kable()
+image(full_model,rotate = F)
+```
+
+According to the summary, the highest post probability model is including *runtime*, *imdb_rating* and *critics_score* with post probability 0.1297. With the P(B!= 0|Y) = 1, *imdb_rating* is inluding is all the possible models. Following it, *critics_score* has 88.9% chance to be included in final model and *runtime* has 47.0%. *best_actor_win* and *mpaa_rating_R* are also include in the 3rd and 4th model, but consider the post probability, we still won't use them in the final model.
+
+So here is our final model:
+
+> audience_score ~ runtime + imdb_rating + critics_score
+
+```{r}
+final_model <- bas.lm(audience_score ~ runtime + imdb_rating + critics_score,
+                     data = na.omit(movies),
+                     prior = "BIC",
+                     modelprior = uniform())
+summary(final_model) %>% kable()
+coef(final_model, estimator = "BPM")
+
+```
+
+
+### Model diagnostics
+```{r}
+BPM_final_model <- predict(final_model, estimator="BPM", se.fit=TRUE)
+res_final_model <- BPM_final_model$fit - na.omit(movies)$audience_score
+
+gp1 <- ggplot(data.frame(BPM_final_model$fit,res_final_model),aes(BPM_final_model$fit,res_final_model))+
+  geom_point()+
+  geom_hline(yintercept = 0,col="red")
+
+y <- quantile(res_final_model, c(0.25, 0.75))
+x <- qnorm(c(0.25, 0.75))
+slope <- diff(y)/diff(x)
+int <- y[1] - slope * x[1]
+gp2 <- ggplot(data.frame(res_final_model), aes(sample = res_final_model))+
+  stat_qq()+ geom_abline(slope = slope, intercept = int,col="red")
+
+gp3 <-ggplot(data.frame(res_final_model),aes(res_final_model))+geom_histogram()
+
+grid.arrange(gp1, gp2, gp3, nrow = 1)
+```
+First let's check the normality of residuals. From the scatter plot of residuals and fitted value, qq-norm plot and the histogram we can see that the residuals is nearly following normal distribution with little skew to left. Then we plot out the relationship between residuals and predict variables.
+
+```{r, fig.height = 8}
+res_var <- data.frame(res_final_model,na.omit(movies)[c("runtime","imdb_rating", "critics_score")])
+rvp1 <- ggplot(res_var,aes(x=runtime,y=res_final_model))+
+  geom_point()+
+  geom_hline(yintercept = 0,col="red")
+rvp2 <- ggplot(res_var,aes(x=imdb_rating,y=res_final_model))+
+  geom_point()+
+  geom_hline(yintercept = 0,col="red")
+rvp3 <- ggplot(res_var,aes(x=critics_score,y=res_final_model))+
+  geom_point()+
+  geom_hline(yintercept = 0,col="red")
+grid.arrange(rvp1, rvp2, rvp3, nrow = 3)
+```
+Figures above shows that the residuals are generally scattered around 0 and no any fan shape appear. So we can say the model is meeting the necessary condition.
+
+* * *
+
+## Part 5: Prediction
+Lala Land is one of my favorite movie in year 2016 so I will use this movie for prediction. Its audience score, genre and MPAA rating information are from [Rotten Tomatoes](https://www.rottentomatoes.com/m/la_la_land) and the award information are from [IMDb](http://www.imdb.com/title/tt3783958/awards?ref_=tt_ql_op_1) which is list as following:  
+
+* runtime = 128  
+* imdb_rating = 8.1  
+* critics_score = 92  
+
+```{r}
+Lala_Land <- data.frame(runtime = 128, imdb_rating = 8.1, critics_score = 92)
+pred_lalaland <- predict(final_model, Lala_Land, estimator="BPM", se.fit=TRUE)
+confint(pred_lalaland)
+```
+
+Putting the information into the finial model, the point estimation of *audience_score* is 88.293 with 95% credible interval [68.039, 100], since the score cannot exceed 100. So we can say that with 95% probability that the real audience score on Rotten Tomatoes for Lala Land is fall into the interval from 68.039 to 100.
+
+* * *
+
+## Part 6: Conclusion
+The Bayesian regression model we create in this research allow us to predict a movie's audience  score on Rotten Tomatoes using its runtime, rating from IMDb and critics score from Rotten Tomatoes. The final model we pick is the best predictive model using Bayesian Model Averaging. It can explain nearly 75% of the sample movies.
+
+From the model result, we know that a movie's popularity has strong positive relate to its IMDb rating. Both websites are famous on movie reviewing and rating, so the opinion from these two website should go into same direction. Audience score also have positive relationship with critics score but negative associate with movie's runtime.
+
+One of the shortcomings of this model is we only modify some variables for separating some specific type of movies which might lost information from other features. For future research, we could switch to some other categories and approach to a better estimation. Another shortcoming is that the variables in the dataset is limited. For example, an Oscar award is just one of the many awards that could measure a movie's popularity, so we can include more valuable awards or other information for movies and actors/actresses. 
+

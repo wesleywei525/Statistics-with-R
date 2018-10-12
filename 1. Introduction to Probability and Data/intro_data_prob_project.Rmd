@@ -1,0 +1,129 @@
+---
+title: "Exploring the BRFSS data"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  pdf_document: default
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+library(reshape2)
+```
+
+### Load data
+
+```{r load-data}
+load("brfss2013.RData")
+```
+
+
+
+* * *
+
+## Part 1: Data
+Behavioral Risk Factor Surveillance System(BRFSS) was initiated by CDC and involved the pubilc health departments in all states, including District of Columbia, Puerto Rico and US Virgin Islands. A cross-sectonal telephone survey conduct monthly over landline telephones and cellular telephones.
+
+Disproportionate stratified sampling is used for landline sample since 2003 which ramdonly draws telephone numbers from two strata that are based on the presumed density of household numbers. The cellular telephone sample is randomly generated from a sampling frame of cellular area code and prefix combinations. In this case BRFSS should be generalizable to all non-institutionalized adults(18 years of age and older) residing in the US. However, individuals that don't live in house or cannot be reached by cellular phone like tramps are not represented by the study.
+
+The BRFSS data is observational data not experimental data, which means survey subjects are randomly selected but not randomly assigned to study groups. So we cannot make causal conclusions base on this study.
+
+
+* * *
+
+## Part 2: Research questions
+
+**Research quesion 1: How will the sleeping hours associate with the Computed Body Mass Index and if there is different base on gender? I want to see if the people having a good sleeping hours will have lower chance to become overweight. I use the Overweight Or Obese Calculated Variable for generate the pverweight percentage. **
+
+**Research quesion 2: Does a person's smoking and drink habit related to the heart attach history? I want to know if individual with both smoking and drink habit will have higher chance to have heart attach history than person only have one or neither. **
+
+**Research quesion 3: How does a person's income level associate with his/her exercise history. People with higher income might have more leisure time spending on physical activity or exercise. **
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+**Research quesion 1: I first calculate the overweight percentage separately for male and female and for each sleeping hour. The bar plot shows that the female sleep 7 hours averagely will have lower chance to get overweight. But for the males, there are several lower points at 11 and 19 hours. It should cause by the unblance of sample. And the bar plot also indicate that the sleeping hours affect differently on male and female. **
+
+```{r}
+## Calculate overweight percentage for male
+male_result <- subset(brfss2013,sex == "Male", select = c("sleptim1", "X_rfbmi5")) %>%
+  table()
+
+male_result<- male_result %>%
+  apply(1,sum) %>%
+    cbind(male_result) %>%
+      `colnames<-`(c("Total","No","Yes")) %>%
+        data.frame()
+
+male_percent <- apply(male_result,1,function(x){x["Yes"]/x["Total"]})
+
+## Calculate overweight percentage for female
+female_result <- subset(brfss2013,sex == "Female", select = c("sleptim1", "X_rfbmi5")) %>%
+  table()
+
+female_result<- female_result %>%
+  apply(1,sum) %>%
+    cbind(female_result) %>%
+      `colnames<-`(c("Total","No","Yes")) %>%
+        data.frame()
+
+female_percent <- apply(female_result,1,function(x){x["Yes"]/x["Total"]})
+female_percent <- c(female_percent[1:22],0,female_percent[23])
+
+percent_data<-data.frame(cbind(1:24,male_percent,female_percent))
+melt(percent_data,id.vars = 1)%>%
+  ggplot(aes(x=V1, y=value))+geom_bar(aes(fill = variable),stat="identity",position="dodge")+
+  scale_x_continuous(breaks = c(1:24))+
+  xlab("Sleeping hours")+ylab("Overweight percentage")
+```
+** Above plot shows the relationship between Sleeping hours and overweight percentage grouped by gender. Sleeping hours affect differently base on gender **
+
+
+**Research quesion 2: It appears that people with only smoking histroy have highest rate on ever diagnosed with heart attack. And drinking hobit will pull down this rate. So people both smoking and drinking have lower heart attact rate than only smoking people. **
+
+```{r}
+table(brfss2013$cvdinfr4,brfss2013$X_rfbing5)
+
+apply(table(brfss2013$cvdinfr4,brfss2013$X_rfbing5),1,prop.table)
+
+Smoke_drink <- rep(NA,dim(brfss2013)[1])
+Smoke_drink[which(brfss2013$smoke100 == "Yes" & brfss2013$X_rfbing5 == "Yes")] <- "Smoke and Drink"
+Smoke_drink[which(brfss2013$smoke100 == "Yes" & brfss2013$X_rfbing5 == "No")] <- "Only Smoke"
+Smoke_drink[which(brfss2013$smoke100 == "No" & brfss2013$X_rfbing5 == "Yes")] <- "Only Drink"
+Smoke_drink[which(brfss2013$smoke100 == "No" & brfss2013$X_rfbing5 == "No")] <- "Neither Smoke nor Drink"
+sd_result <- apply(table(brfss2013$cvdinfr4,Smoke_drink),2,prop.table) %>%
+  data.frame() %>%
+    t() %>%
+      subset(select="Yes") %>%
+        melt(id.vars= 1) 
+
+ggplot(sd_result, aes(x=Var1, y=value))+geom_bar(stat="identity",position="dodge")+
+  xlab("Smoke and Drink Habit")+ylab("Percentage of Ever Diagnosed With Heart Attack")
+
+```
+
+
+
+**Research quesion 3: Plot of the relationship between income level and exercise history show higher income group have higher proportion of people doing exercise. However this result might also relate to their living environment and their working hours. **
+
+```{r}
+physical_activity <- table(brfss2013$X_incomg,brfss2013$X_totinda) %>%
+  apply(1,prop.table) %>%
+    t() %>%
+      `rownames<-`(c("<15K","15K~25K","25K~35K","35K~50K","50K+")) %>%
+        melt(id.vars =1)
+
+ggplot(physical_activity, aes(x = Var1, y = value))+geom_bar(aes(fill = Var2),stat="identity",position= "stack")+
+  xlab("Income Categories")+ylab("Physical activity")+theme(legend.position="top",legend.title = element_blank())
+```
+
